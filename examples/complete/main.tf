@@ -2,7 +2,6 @@ provider "aws" {
   region = local.region
 
   # Make it faster by skipping something
-  skip_get_ec2_platforms      = true
   skip_metadata_api_check     = true
   skip_region_validation      = true
   skip_credentials_validation = true
@@ -13,7 +12,6 @@ locals {
   bucket_name = "s3-bucket-${random_pet.this.id}"
   region      = "eu-west-1"
 }
-
 
 data "aws_caller_identity" "current" {}
 
@@ -69,19 +67,26 @@ module "log_bucket" {
   source = "../../"
 
   bucket        = "logs-${random_pet.this.id}"
-  acl           = "log-delivery-write"
   force_destroy = true
+
+  control_object_ownership = true
 
   attach_elb_log_delivery_policy        = true
   attach_lb_log_delivery_policy         = true
+  attach_access_log_delivery_policy     = true
   attach_deny_insecure_transport_policy = true
   attach_require_latest_tls_policy      = true
+
+  access_log_delivery_policy_source_accounts = [data.aws_caller_identity.current.account_id]
+  access_log_delivery_policy_source_buckets  = ["arn:aws:s3:::${local.bucket_name}"]
 }
 
 module "cloudfront_log_bucket" {
   source = "../../"
 
-  bucket = "cloudfront-logs-${random_pet.this.id}"
+  bucket                   = "cloudfront-logs-${random_pet.this.id}"
+  control_object_ownership = true
+  object_ownership         = "ObjectWriter"
 
   grant = [{
     type       = "CanonicalUser"
@@ -97,6 +102,14 @@ module "cloudfront_log_bucket" {
   owner = {
     id = data.aws_canonical_user_id.current.id
   }
+
+  force_destroy = true
+}
+
+module "simple_bucket" {
+  source = "../../"
+
+  bucket = "simple-${random_pet.this.id}"
 
   force_destroy = true
 }
@@ -127,16 +140,20 @@ module "s3_bucket" {
   }
 
   # Bucket policies
-  attach_policy                         = true
-  policy                                = data.aws_iam_policy_document.bucket_policy.json
-  attach_deny_insecure_transport_policy = true
-  attach_require_latest_tls_policy      = true
+  attach_policy                            = true
+  policy                                   = data.aws_iam_policy_document.bucket_policy.json
+  attach_deny_insecure_transport_policy    = true
+  attach_require_latest_tls_policy         = true
+  attach_deny_incorrect_encryption_headers = true
+  attach_deny_incorrect_kms_key_sse        = true
+  allowed_kms_key_arn                      = aws_kms_key.objects.arn
+  attach_deny_unencrypted_object_uploads   = true
 
-  # S3 bucket-level Public Access Block configuration
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  # S3 bucket-level Public Access Block configuration (by default now AWS has made this default as true for S3 bucket-level block public access)
+  # block_public_acls       = true
+  # block_public_policy     = true
+  # ignore_public_acls      = true
+  # restrict_public_buckets = true
 
   # S3 Bucket Ownership Controls
   # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_ownership_controls
